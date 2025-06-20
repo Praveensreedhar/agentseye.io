@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Network Dashboard</title>
+  <style>
+    body { font-family: sans-serif; background: #f4f4f4; padding: 20px; }
+    .report {
+      background: white; padding: 15px; margin-bottom: 20px;
+      border-radius: 6px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    pre { background: #eee; padding: 10px; white-space: pre-wrap; }
+    canvas { width: 100%; height: 300px; }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+<h1>Agent Reports</h1>
+<h2>Pathping Visualization</h2>
+<iframe src="/static/pathping_graph.html" width="100%" height="500" style="border: none;"></iframe>
+
+
+<!-- Hop Chart -->
+<canvas id="hopChart"></canvas>
+
+<script>
+  const reports = {{ reports | tojson }};
+  const latestTrace = reports[reports.length - 1]?.tracert?.[0]?.output || "";
+
+  function parseTraceroute(output) {
+    const lines = output.split('\n');
+    const hops = [];
+
+    for (const line of lines) {
+      const hopMatch = line.match(/^\s*(\d+)\s+(.*)/);
+      if (!hopMatch) continue;
+
+      const hopNum = hopMatch[1];
+      const rest = hopMatch[2];
+
+      const ipMatch = rest.match(/(\d{1,3}(\.\d{1,3}){3})/);
+      const latencyMatch = rest.match(/(\d+\s*ms)/g);
+      const latencies = latencyMatch ? latencyMatch.map(l => parseInt(l)) : [];
+      const avgLatency = latencies.length ? Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length) : null;
+
+      if (ipMatch) {
+        hops.push({
+          hop: parseInt(hopNum),
+          ip: ipMatch[1],
+          latency: avgLatency
+        });
+      }
+    }
+    return hops;
+  }
+
+  const hops = parseTraceroute(latestTrace);
+  const ctx = document.getElementById('hopChart').getContext('2d');
+
+  new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: hops.map(h => `Hop ${h.hop}`),
+      datasets: [{
+        label: 'Latency (ms)',
+        data: hops.map(h => h.latency),
+        borderColor: 'blue',
+        backgroundColor: 'blue',
+        tension: 0.3,
+        pointRadius: 5,
+        pointHoverRadius: 7,
+        pointHoverBackgroundColor: 'red',
+        pointBackgroundColor: 'blue',
+        pointHoverBorderWidth: 2,
+        pointStyle: 'circle'
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        tooltip: {
+          callbacks: {
+            label: function(ctx) {
+              const index = ctx.dataIndex;
+              const ip = hops[index].ip;
+              const latency = hops[index].latency;
+              return `IP: ${ip}, Latency: ${latency} ms`;
+            }
+          }
+        },
+        legend: { display: false },
+        title: {
+          display: true,
+          text: 'Traceroute Hops'
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          title: { display: true, text: 'Latency (ms)' }
+        },
+        x: {
+          title: { display: true, text: 'Hops' }
+        }
+      }
+    }
+  });
+</script>
+
+<!-- Report Details -->
+{% for report in reports %}
+  <div class="report">
+    <strong>Agent:</strong> {{ report.agent_id }}<br>
+    <strong>Time:</strong> {{ report.timestamp }}<br>
+
+    <h4>Pathping:</h4>
+    <ul>
+      {% for p in report.pathping %}
+        <li><strong>{{ p.host }}</strong><pre>{{ p.output }}</pre></li>
+      {% endfor %}
+    </ul>
+
+    <h4>Traceroute:</h4>
+    <ul>
+      {% for t in report.tracert %}
+        <li><strong>{{ t.host }}</strong><pre>{{ t.output }}</pre></li>
+      {% endfor %}
+    </ul>
+
+    <h4>Ping Results:</h4>
+    <ul>
+      {% for p in report.ping %}
+        <li><strong>{{ p.host }}</strong><pre>{{ p.output }}</pre></li>
+      {% endfor %}
+    </ul>
+
+    <h4>Path MTU:</h4>
+    <ul>
+      {% for mtu in report.path_mtu %}
+        <li>{{ mtu.host }} → MTU: {{ mtu.path_mtu }}</li>
+      {% endfor %}
+    </ul>
+
+    <h4>HTTP Check:</h4>
+    <ul>
+      {% for h in report.http %}
+        <li>{{ h.url }} → {{ h.status_code or h.error }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+{% endfor %}
+
+</body>
+</html>
